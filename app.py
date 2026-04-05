@@ -50,7 +50,8 @@ except ImportError:
 @st.cache_resource
 def load_nlp():
     """Load spaCy English model once and cache it."""
-    return spacy.load("en_core_web_sm")
+    import spacy
+    return spacy.blank("en")
 
 @st.cache_resource
 def download_stopwords():
