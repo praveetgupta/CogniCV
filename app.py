@@ -9,6 +9,23 @@ Required pip installs:
     python -m spacy download en_core_web_sm
 """
 
+SYNONYMS = {
+    "nlp": ["natural language processing"],
+    "rag": ["retrieval augmented generation", "retrieval-augmented generation"],
+    "ml": ["machine learning"],
+    "dl": ["deep learning"],
+    "llm": ["large language models"],
+    "api": ["rest", "rest api", "restful api"],
+    "huggingface": ["transformers"],
+}
+
+def apply_synonyms(text: str) -> str:
+    text = text.lower()
+    for key, values in SYNONYMS.items():
+        for val in values:
+            text = text.replace(val, key)
+    return text
+
 # ─────────────────────────────────────────────
 # 1. IMPORTS
 # ─────────────────────────────────────────────
@@ -49,6 +66,11 @@ STOP_WORDS = download_stopwords()
 # ─────────────────────────────────────────────
 # A broad set of recognizable tech / business skills so that
 # extraction is not solely dependent on spaCy NER.
+CORE_SKILLS = {
+        "python", "machine learning", "nlp", "deep learning",
+        "pytorch", "tensorflow", "rag"
+    }    
+
 KNOWN_SKILLS = {
     # Programming & scripting
     "python", "java", "javascript", "typescript", "c++", "c#", "go", "golang",
@@ -110,20 +132,32 @@ def extract_text_from_pdf(uploaded_file) -> str:
 
 
 def preprocess(text: str) -> str:
-    """
-    Clean raw text:
-      • lowercase
-      • strip URLs, emails, phone numbers
-      • remove punctuation (keep hyphens inside words)
-      • collapse whitespace
-    """
     text = text.lower()
-    text = re.sub(r"http\S+|www\.\S+", " ", text)           # URLs
-    text = re.sub(r"\S+@\S+", " ", text)                     # emails
-    text = re.sub(r"\+?\d[\d\-\(\) ]{7,}\d", " ", text)     # phone numbers
-    text = re.sub(r"[^\w\s\-\.\+#]", " ", text)             # special chars
-    text = re.sub(r"\s+", " ", text).strip()                 # collapse spaces
-    return text
+
+    # Apply synonym normalization FIRST
+    text = apply_synonyms(text)
+
+    # Remove URLs, emails, phone numbers
+    text = re.sub(r"http\S+|www\.\S+", " ", text)
+    text = re.sub(r"\S+@\S+", " ", text)
+    text = re.sub(r"\+?\d[\d\-\(\) ]{7,}\d", " ", text)
+
+    # Remove special characters
+    text = re.sub(r"[^\w\s]", " ", text)
+
+    # Collapse spaces
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # Use spaCy (FIXED: use NLP not nlp)
+    doc = NLP(text)
+
+    tokens = [
+        token.lemma_
+        for token in doc
+        if not token.is_stop and not token.is_punct
+    ]
+
+    return " ".join(tokens)
 
 
 def remove_stopwords(text: str) -> str:
@@ -141,7 +175,7 @@ def extract_skills(text: str) -> set:
          that look like tool / tech names (single or two-word).
     Returns a de-duplicated set of skill strings.
     """
-    clean = preprocess(text)
+    clean = apply_synonyms(preprocess(text))
     found: set[str] = set()
 
     # Pass 1 — dictionary
@@ -166,22 +200,52 @@ def extract_skills(text: str) -> set:
 
     return found
 
+def filter_relevant_skills(skills: set) -> set:
+    IMPORTANT = {
+        "python", "machine learning", "deep learning", "nlp",
+        "rag", "transformers", "pytorch", "tensorflow",
+        "docker", "aws", "gcp", "mlops", "fastapi",
+        "data science", "api", "classification",
+        "cybersecurity", "generative ai"
+    }
+
+    return {s for s in skills if s in IMPORTANT}
+
 # ─────────────────────────────────────────────
 # 6. TF-IDF MATCHING
 # ─────────────────────────────────────────────
-def compute_match_score(resume_text: str, jd_text: str) -> float:
-    """
-    Compute cosine similarity between resume and job description
-    using TF-IDF vectors.  Returns a percentage (0–100).
-    """
-    corpus = [
-        remove_stopwords(preprocess(resume_text)),
-        remove_stopwords(preprocess(jd_text)),
-    ]
-    vectorizer = TfidfVectorizer()
-    tfidf_matrix = vectorizer.fit_transform(corpus)
-    score = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
-    return round(score * 100, 1)
+def compute_match_score(resume_text: str, jd_text: str, resume_skills: set, jd_skills: set):
+    # --- TEXT SIMILARITY ---
+    resume_clean = apply_synonyms(preprocess(resume_text))
+    jd_clean = apply_synonyms(preprocess(jd_text))
+
+    # remove soft skill noise
+    NOISE_WORDS = {"communication", "teamwork", "problem", "skills"}
+
+    jd_clean = " ".join([w for w in jd_clean.split() if w not in NOISE_WORDS])
+
+    vectorizer = TfidfVectorizer(ngram_range=(1, 2))
+    tfidf_matrix = vectorizer.fit_transform([resume_clean, jd_clean])
+    text_score = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
+
+    # --- SKILL MATCH (better logic) ---
+    matched = resume_skills & jd_skills
+
+    core_matches = len([s for s in matched if s in CORE_SKILLS])
+    other_matches = len(matched) - core_matches
+
+    total_possible = len(jd_skills)
+
+    if total_possible:
+        skill_score = (core_matches * 2 + other_matches) / (total_possible * 1.5)
+    else:
+        skill_score = 0
+    
+    skill_score = min(skill_score, 1.0)
+    # --- FINAL SCORE ---
+    final_score = (0.65 * skill_score + 0.35 * text_score) * 100
+
+    return round(final_score, 1), round(skill_score * 100, 1), round(text_score * 100, 1)
 
 # ─────────────────────────────────────────────
 # 7. IMPROVEMENT SUGGESTIONS (rule-based)
@@ -205,6 +269,10 @@ def generate_suggestions(
             "**Add missing skills:** Consider gaining experience in or "
             f"highlighting these on your resume — {', '.join(top)}."
         )
+    
+    if missing_skills:
+        top_missing = list(missing_skills)[:3]
+        tips.append(f"**Top gaps:** {', '.join(top_missing)}")
 
     # ── Quantifiable achievements ──
     has_numbers = bool(re.search(r"\d+\s*%|\$\s*\d|#?\d{2,}", clean))
@@ -277,20 +345,46 @@ def generate_suggestions(
 # 8. STREAMLIT UI
 # ─────────────────────────────────────────────
 def score_color(score: float) -> str:
-    """Return a hex color based on score bracket."""
     if score >= 70:
         return "#22c55e"   # green
-    if score >= 45:
-        return "#eab308"   # amber
-    return "#ef4444"       # red
+    elif score >= 40:
+        return "#eab308"   # yellow (IMPORTANT CHANGE)
+    else:
+        return "#ef4444"   # red
 
 
 def score_label(score: float) -> str:
-    if score >= 70:
-        return "Strong Match"
-    if score >= 45:
-        return "Moderate Match"
-    return "Needs Improvement"
+    if score >= 75:
+        return "Excellent Fit"
+    elif score >= 55:
+        return "Good Potential"
+    elif score >= 35:
+        return "Partial Match"
+    else:
+        return "Needs Improvement"
+
+def group_skills(skills: set):
+    groups = {
+        "Cloud": {"aws", "gcp", "azure"},
+        "DevOps": {"docker", "kubernetes", "mlops"},
+        "Backend/API": {"api", "fastapi", "rest"},
+        "AI/ML": {"classification", "deep learning", "nlp", "rag"},
+        "Security": {"cybersecurity"},
+    }
+
+    grouped = {}
+
+    for skill in skills:
+        found = False
+        for group, keywords in groups.items():
+            if skill in keywords:
+                grouped.setdefault(group, []).append(skill)
+                found = True
+                break
+        if not found:
+            grouped.setdefault("Other", []).append(skill)
+
+    return grouped
 
 
 def main():
@@ -459,12 +553,30 @@ def main():
             resume_skills = extract_skills(resume_text)
             jd_skills = extract_skills(job_description)
 
+            # Step C — Filter important skills only
+            resume_skills_filtered = filter_relevant_skills(resume_skills)
+            jd_skills_filtered = filter_relevant_skills(jd_skills)
+
             # Step C — Compute match score via TF-IDF + cosine similarity
-            match_score = compute_match_score(resume_text, job_description)
+            match_score, skill_score, text_score = compute_match_score(
+                resume_text,
+                job_description,
+                resume_skills_filtered,
+                jd_skills_filtered,
+            )
 
             # Step D — Find matched & missing skills
-            matched_skills = resume_skills & jd_skills
-            missing_skills = jd_skills - resume_skills
+            matched_skills = resume_skills_filtered & jd_skills_filtered
+            # Remove generic/non-skill words
+            GENERIC_WORDS = {
+                "communication", "teamwork", "india", "cross-functional",
+                "problem solving", "analytical thinking", "leadership", 
+            }
+
+            missing_skills = {
+                skill for skill in (jd_skills_filtered - resume_skills_filtered)
+                if skill not in GENERIC_WORDS and len(skill) > 2
+            }
             extra_skills = resume_skills - jd_skills   # skills only in resume
 
             # Step E — Generate suggestions
@@ -477,6 +589,10 @@ def main():
         color = score_color(match_score)
         label = score_label(match_score)
 
+        if skill_score == 100 and text_score < 30:
+            color = "#f97316"
+            label = "Strong Skills, Weak Alignment"
+
         st.markdown(
             f'<div class="score-card">'
             f'<div class="score-number" style="color:{color}">{match_score}%</div>'
@@ -485,6 +601,34 @@ def main():
             unsafe_allow_html=True,
         )
         st.progress(min(match_score / 100, 1.0))
+
+        if skill_score == 100 and text_score < 30:
+            explanation = "You have the right skills, but your resume wording doesn’t align well with the job description."
+
+        elif match_score >= 75:
+            explanation = "Your resume strongly matches the job requirements."
+
+        elif match_score >= 50:
+            explanation = "Your resume matches core requirements but has some gaps."
+
+        else:
+            explanation = "Your resume needs significant improvement for this role."
+
+        st.markdown(f"""
+        <div style="text-align:center; margin-top:8px; font-size:0.95rem; opacity:0.75;">
+        {explanation}
+        </div>
+        """, unsafe_allow_html=True)
+
+
+        color_skill = "#22c55e" if skill_score > 70 else "#eab308"
+        color_text = "#22c55e" if text_score > 50 else "#ef4444"
+        st.markdown(f"""
+        <div style="text-align:center; margin-top:10px; font-size:0.95rem; opacity:0.85;">
+        Skill Match: <b style="color:{color_skill}">{skill_score}%</b> &nbsp;&nbsp;|&nbsp;&nbsp;
+        Text Match: <b style="color:{color_text}">{text_score}%</b>
+        </div>
+        """, unsafe_allow_html=True)
 
         # ── Matched Keywords ──
         st.markdown('<div class="section-title">✅ Matched Keywords</div>', unsafe_allow_html=True)
@@ -500,18 +644,22 @@ def main():
         # ── Missing Skills ──
         st.markdown('<div class="section-title">❌ Missing Skills</div>', unsafe_allow_html=True)
         if missing_skills:
-            pills = "".join(
-                f'<span class="skill-pill pill-missing">{s}</span>'
-                for s in sorted(missing_skills)
-            )
-            st.markdown(pills, unsafe_allow_html=True)
+            grouped = group_skills(missing_skills)
+
+            for group, skills in grouped.items():
+                st.markdown(f"**{group}:**")
+                pills = "".join(
+                    f'<span class="skill-pill pill-missing">{s}</span>'
+                    for s in sorted(skills)
+                )
+                st.markdown(pills, unsafe_allow_html=True)
         else:
             st.success("Great — your resume covers all detected JD skills!")
 
         # ── Extra Resume Skills (bonus context) ──
         if extra_skills:
             st.markdown(
-                '<div class="section-title">🔵 Additional Skills on Your Resume</div>',
+                '<div class="section-title">🔵 Skills Found in Resume (Not in JD)</div>',
                 unsafe_allow_html=True,
             )
             pills = "".join(
