@@ -176,7 +176,7 @@ def extract_skills(text: str) -> set:
          that look like tool / tech names (single or two-word).
     Returns a de-duplicated set of skill strings.
     """
-    clean = apply_synonyms(preprocess(text))
+    clean = apply_synonyms(text.lower())
     found: set[str] = set()
 
     # Pass 1 — dictionary
@@ -217,8 +217,8 @@ def filter_relevant_skills(skills: set) -> set:
 # ─────────────────────────────────────────────
 def compute_match_score(resume_text: str, jd_text: str, resume_skills: set, jd_skills: set):
     # --- TEXT SIMILARITY ---
-    resume_clean = apply_synonyms(preprocess(resume_text))
-    jd_clean = apply_synonyms(preprocess(jd_text))
+    resume_clean = apply_synonyms(resume_text.lower())
+    jd_clean = apply_synonyms(jd_text.lower())
 
     # remove soft skill noise
     NOISE_WORDS = {"communication", "teamwork", "problem", "skills"}
@@ -226,8 +226,16 @@ def compute_match_score(resume_text: str, jd_text: str, resume_skills: set, jd_s
     jd_clean = " ".join([w for w in jd_clean.split() if w not in NOISE_WORDS])
 
     vectorizer = TfidfVectorizer(ngram_range=(1, 2))
-    tfidf_matrix = vectorizer.fit_transform([resume_clean, jd_clean])
-    text_score = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
+
+    # Fallback if text becomes empty after preprocessing
+    if not resume_clean.strip() or not jd_clean.strip():
+        text_score = 0
+    else:
+        try:
+            tfidf_matrix = vectorizer.fit_transform([resume_clean, jd_clean])
+            text_score = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
+        except:
+            text_score = 0
 
     # --- SKILL MATCH (better logic) ---
     matched = resume_skills & jd_skills
@@ -244,6 +252,9 @@ def compute_match_score(resume_text: str, jd_text: str, resume_skills: set, jd_s
     
     skill_score = min(skill_score, 1.0)
     # --- FINAL SCORE ---
+    if skill_score > 0.6 and text_score < 0.2:
+        text_score += 0.1  # small boost for realistic alignment
+
     final_score = (0.65 * skill_score + 0.35 * text_score) * 100
 
     return round(final_score, 1), round(skill_score * 100, 1), round(text_score * 100, 1)
@@ -555,8 +566,8 @@ def main():
             jd_skills = extract_skills(job_description)
 
             # Step C — Filter important skills only
-            resume_skills_filtered = filter_relevant_skills(resume_skills)
-            jd_skills_filtered = filter_relevant_skills(jd_skills)
+            resume_skills_filtered = resume_skills
+            jd_skills_filtered = jd_skills
 
             # Step C — Compute match score via TF-IDF + cosine similarity
             match_score, skill_score, text_score = compute_match_score(
@@ -603,17 +614,14 @@ def main():
         )
         st.progress(min(match_score / 100, 1.0))
 
-        if skill_score == 100 and text_score < 30:
-            explanation = "You have the right skills, but your resume wording doesn’t align well with the job description."
-
-        elif match_score >= 75:
-            explanation = "Your resume strongly matches the job requirements."
-
-        elif match_score >= 50:
-            explanation = "Your resume matches core requirements but has some gaps."
-
+        if match_score >= 75:
+            explanation = "Strong match"
+        elif match_score >= 55:
+            explanation = "Good match with minor gaps"
+        elif match_score >= 40:
+            explanation = "Partial match"
         else:
-            explanation = "Your resume needs significant improvement for this role."
+            explanation = "Needs improvement"
 
         st.markdown(f"""
         <div style="text-align:center; margin-top:8px; font-size:0.95rem; opacity:0.75;">
