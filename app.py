@@ -9,28 +9,10 @@ Required pip installs:
     python -m spacy download en_core_web_sm
 """
 
-SYNONYMS = {
-    "nlp": ["natural language processing"],
-    "rag": ["retrieval augmented generation", "retrieval-augmented generation"],
-    "ml": ["machine learning"],
-    "dl": ["deep learning"],
-    "llm": ["large language models"],
-    "api": ["rest", "rest api", "restful api"],
-    "huggingface": ["transformers"],
-}
-
-def apply_synonyms(text: str) -> str:
-    text = text.lower()
-    for key, values in SYNONYMS.items():
-        for val in values:
-            text = text.replace(val, key)
-    return text
-
 # ─────────────────────────────────────────────
 # 1. IMPORTS
 # ─────────────────────────────────────────────
 import re
-import string
 import streamlit as st
 import spacy
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -38,40 +20,78 @@ from sklearn.metrics.pairwise import cosine_similarity
 import nltk
 from nltk.corpus import stopwords
 
-# PDF text extraction
 try:
-    from PyPDF2 import PdfReader          # PyPDF2 >= 3.x
+    from PyPDF2 import PdfReader
 except ImportError:
-    from pypdf import PdfReader           # fallback to pypdf
+    from pypdf import PdfReader
+
 
 # ─────────────────────────────────────────────
-# 2. ONE-TIME SETUP (cached so it only runs once)
+# 2. ONE-TIME SETUP (cached)
 # ─────────────────────────────────────────────
 @st.cache_resource
 def load_nlp():
-    """Load spaCy English model once and cache it."""
-    import spacy
-    return spacy.blank("en")
+    """Load the FULL spaCy model — not blank — so NER + lemmatizer work."""
+    try:
+        return spacy.load("en_core_web_sm")
+    except OSError:
+        st.warning(
+            "⚠️ spaCy model `en_core_web_sm` not found. "
+            "Run `python -m spacy download en_core_web_sm` for best results. "
+            "Falling back to basic tokenizer."
+        )
+        return spacy.blank("en")
+
 
 @st.cache_resource
 def download_stopwords():
-    """Download NLTK stopwords once and return the set."""
     nltk.download("stopwords", quiet=True)
     return set(stopwords.words("english"))
+
 
 NLP = load_nlp()
 STOP_WORDS = download_stopwords()
 
-# ─────────────────────────────────────────────
-# 3. CURATED SKILL DICTIONARIES
-# ─────────────────────────────────────────────
-# A broad set of recognizable tech / business skills so that
-# extraction is not solely dependent on spaCy NER.
-CORE_SKILLS = {
-        "python", "machine learning", "nlp", "deep learning",
-        "pytorch", "tensorflow", "rag"
-    }    
 
+# ─────────────────────────────────────────────
+# 3. SYNONYM MAP
+# ─────────────────────────────────────────────
+# Maps long-form phrases → canonical short form.
+# Used ONLY during comparison — we normalize both sides equally.
+SYNONYMS = {
+    "natural language processing": "nlp",
+    "retrieval augmented generation": "rag",
+    "retrieval-augmented generation": "rag",
+    "machine learning": "ml",
+    "deep learning": "dl",
+    "large language model": "llm",
+    "large language models": "llm",
+    "restful api": "rest api",
+    "hugging face": "huggingface",
+    # Common variations
+    "scikit-learn": "sklearn",
+    "scikit learn": "sklearn",
+    "sci-kit learn": "sklearn",
+    "postgresql": "postgres",
+    "k8s": "kubernetes",
+    "golang": "go",
+    "node.js": "nodejs",
+    "next.js": "nextjs",
+    "nuxt.js": "nuxtjs",
+    "ci/cd": "cicd",
+    "google cloud": "gcp",
+}
+
+
+def normalize_skill(skill: str) -> str:
+    """Reduce a skill string to its canonical form for comparison."""
+    s = skill.lower().strip()
+    return SYNONYMS.get(s, s)
+
+
+# ─────────────────────────────────────────────
+# 4. CURATED SKILL DICTIONARY
+# ─────────────────────────────────────────────
 KNOWN_SKILLS = {
     # Programming & scripting
     "python", "java", "javascript", "typescript", "c++", "c#", "go", "golang",
@@ -84,15 +104,17 @@ KNOWN_SKILLS = {
     "dotnet", "rails", "laravel", "streamlit", "gradio", "jquery",
     "bootstrap", "tailwind", "material ui",
     # Data / ML / AI
-    "machine learning", "deep learning", "natural language processing", "nlp",
+    "machine learning", "ml", "deep learning", "dl",
+    "natural language processing", "nlp",
     "computer vision", "tensorflow", "pytorch", "keras", "scikit-learn",
     "pandas", "numpy", "scipy", "matplotlib", "seaborn", "plotly",
-    "hugging face", "transformers", "langchain", "openai", "llm",
-    "large language model", "generative ai", "rag",
+    "hugging face", "huggingface", "transformers", "langchain", "openai",
+    "llm", "large language model", "generative ai", "rag",
     "retrieval augmented generation", "fine-tuning", "bert", "gpt",
     "data science", "data analysis", "data engineering", "data visualization",
     "statistics", "a/b testing", "hypothesis testing", "regression",
     "classification", "clustering", "time series", "feature engineering",
+    "mlops",
     # Cloud & DevOps
     "aws", "azure", "gcp", "google cloud", "docker", "kubernetes", "k8s",
     "terraform", "ansible", "jenkins", "github actions", "ci/cd", "cicd",
@@ -102,16 +124,16 @@ KNOWN_SKILLS = {
     "cassandra", "dynamodb", "sqlite", "oracle", "sql server", "firebase",
     "supabase", "neo4j",
     # Tools & practices
-    "git", "github", "gitlab", "bitbucket", "jira", "confluence", "slack",
+    "git", "github", "gitlab", "bitbucket", "jira", "confluence",
     "figma", "sketch", "adobe xd", "photoshop", "illustrator",
-    "agile", "scrum", "kanban", "devops", "microservices", "rest", "restful",
-    "api", "graphql", "grpc", "oauth", "jwt",
-    # Soft skills & business
+    "agile", "scrum", "kanban", "devops", "microservices", "rest",
+    "rest api", "api", "grpc", "oauth", "jwt",
+    # Soft skills
     "leadership", "communication", "teamwork", "problem solving",
     "project management", "product management", "stakeholder management",
-    "presentation", "mentoring", "strategic thinking", "analytical thinking",
+    "mentoring", "strategic thinking", "analytical thinking",
     "critical thinking", "time management", "cross-functional",
-    # Certifications & standards
+    # Certifications
     "pmp", "aws certified", "azure certified", "google certified",
     "scrum master", "six sigma", "itil",
     # Other domains
@@ -122,66 +144,52 @@ KNOWN_SKILLS = {
     "bigquery",
 }
 
+# Skills too generic to flag as "missing" — they just add noise
+SOFT_GENERIC_SKILLS = {
+    "communication", "teamwork", "problem solving", "analytical thinking",
+    "leadership", "cross-functional", "strategic thinking", "critical thinking",
+    "time management", "mentoring", "stakeholder management",
+}
+
+
 # ─────────────────────────────────────────────
-# 4. TEXT EXTRACTION & PREPROCESSING
+# 5. TEXT EXTRACTION & PREPROCESSING
 # ─────────────────────────────────────────────
 def extract_text_from_pdf(uploaded_file) -> str:
     """Read all pages from an uploaded PDF and return combined text."""
     reader = PdfReader(uploaded_file)
-    pages = [page.extract_text() or "" for page in reader.pages]
-    return "\n".join(pages)
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
 
 
-def preprocess(text: str) -> str:
+def preprocess_for_tfidf(text: str) -> str:
+    """
+    Light preprocessing for TF-IDF: lowercase, strip noise, remove stopwords.
+    Does NOT run spaCy — that would be expensive and unnecessary here.
+    """
     text = text.lower()
-
-    # Apply synonym normalization FIRST
-    text = apply_synonyms(text)
-
-    # Remove URLs, emails, phone numbers
     text = re.sub(r"http\S+|www\.\S+", " ", text)
     text = re.sub(r"\S+@\S+", " ", text)
     text = re.sub(r"\+?\d[\d\-\(\) ]{7,}\d", " ", text)
-
-    # Remove special characters
-    text = re.sub(r"[^\w\s]", " ", text)
-
-    # Collapse spaces
+    text = re.sub(r"[^\w\s\-\.\+#]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
-
-    # Use spaCy (FIXED: use NLP not nlp)
-    doc = NLP(text)
-
-    tokens = [
-        token.lemma_
-        for token in doc
-        if not token.is_stop and not token.is_punct
-    ]
-
-    return " ".join(tokens)
-
-
-def remove_stopwords(text: str) -> str:
-    """Remove English stopwords from a text string."""
     return " ".join(w for w in text.split() if w not in STOP_WORDS)
 
+
 # ─────────────────────────────────────────────
-# 5. SKILL EXTRACTION
+# 6. SKILL EXTRACTION
 # ─────────────────────────────────────────────
 def extract_skills(text: str) -> set:
     """
     Two-pass skill extraction:
-      1. Dictionary lookup — match every known skill phrase in text.
-      2. spaCy NER — pull out entities tagged as ORG, PRODUCT, or GPE
-         that look like tool / tech names (single or two-word).
-    Returns a de-duplicated set of skill strings.
+      Pass 1 — Dictionary: regex-match every known skill phrase.
+      Pass 2 — spaCy NER: pull ORG / PRODUCT entities as candidate skills.
+    Returns raw skill strings (not yet normalized).
     """
-    clean = apply_synonyms(text.lower())
-    found: set[str] = set()
+    clean = text.lower()
+    found = set()
 
-    # Pass 1 — dictionary
+    # Pass 1 — dictionary lookup
     for skill in KNOWN_SKILLS:
-        # Use word-boundary regex so "r" doesn't match every word with 'r'
         if len(skill) <= 2:
             pattern = rf"\b{re.escape(skill)}\b"
         else:
@@ -189,315 +197,333 @@ def extract_skills(text: str) -> set:
         if re.search(pattern, clean):
             found.add(skill)
 
-    # Pass 2 — spaCy NER on *original* (uncleaned) text for better entity recognition
-    doc = NLP(text)
-    for ent in doc.ents:
-        label = ent.label_
-        ent_text = ent.text.lower().strip()
-        if label in ("ORG", "PRODUCT", "GPE", "WORK_OF_ART"):
-            # Keep it only if it looks like a tech term (≤ 4 words, no pure numbers)
-            if 1 <= len(ent_text.split()) <= 4 and not ent_text.isnumeric():
-                found.add(ent_text)
+    # Pass 2 — spaCy NER (only if model has a pipeline)
+    # IMPORTANT: Only accept NER entities that look like real tech skills.
+    # Raw NER produces too many false positives (school names, event names,
+    # locations, abbreviations) so we validate against KNOWN_SKILLS or
+    # require the entity to be a single recognizable tech-like token.
+    if NLP.pipe_names:
+        doc = NLP(text[:100_000])
+        for ent in doc.ents:
+            if ent.label_ in ("ORG", "PRODUCT"):
+                ent_text = ent.text.lower().strip()
+                # Only accept if it's already in our dictionary (catches
+                # casing variants like "PyTorch" → "pytorch") — don't
+                # blindly trust spaCy for unknown entities.
+                if ent_text in KNOWN_SKILLS:
+                    found.add(ent_text)
 
     return found
 
-def filter_relevant_skills(skills: set) -> set:
-    IMPORTANT = {
-        "python", "machine learning", "deep learning", "nlp",
-        "rag", "transformers", "pytorch", "tensorflow",
-        "docker", "aws", "gcp", "mlops", "fastapi",
-        "data science", "api", "classification",
-        "cybersecurity", "generative ai"
-    }
 
-    return {s for s in skills if s in IMPORTANT}
+def normalize_skill_set(skills: set) -> dict:
+    """
+    Normalize a set of raw skills into {canonical_form: display_form}.
+    Merges synonyms so "nlp" and "natural language processing" become one entry.
+    Keeps the longer / more readable form as display name.
+    """
+    normalized = {}
+    for skill in skills:
+        canon = normalize_skill(skill)
+        if canon not in normalized or len(skill) > len(normalized[canon]):
+            normalized[canon] = skill
+    return normalized
+
 
 # ─────────────────────────────────────────────
-# 6. TF-IDF MATCHING
+# 7. MATCHING
 # ─────────────────────────────────────────────
-def compute_match_score(resume_text: str, jd_text: str, resume_skills: set, jd_skills: set):
-    # --- TEXT SIMILARITY ---
-    resume_clean = apply_synonyms(resume_text.lower())
-    jd_clean = apply_synonyms(jd_text.lower())
+def compute_match_score(
+    resume_text: str,
+    jd_text: str,
+    resume_canon: set,
+    jd_canon: set,
+) -> tuple:
+    """
+    Blended score from two signals:
+      • Skill overlap  — what % of JD skills appear in the resume
+      • TF-IDF cosine  — full-text semantic alignment
 
-    # remove soft skill noise
-    NOISE_WORDS = {"communication", "teamwork", "problem", "skills"}
+    The blend adapts to JD length:
+      Short JDs (< 100 words) → mostly skill overlap (TF-IDF is noisy)
+      Long JDs  (300+ words)  → balanced 55/45
 
-    jd_clean = " ".join([w for w in jd_clean.split() if w not in NOISE_WORDS])
+    TF-IDF raw cosine between a multi-page resume and a short JD is
+    structurally low (typically 5–20%) because the documents differ so
+    much in length and vocabulary density.  We rescale it so that a
+    cosine of ~0.30 maps to 100% (empirical ceiling for this task).
 
-    vectorizer = TfidfVectorizer(ngram_range=(1, 2))
+    Returns (final_score, skill_pct, text_pct) — all 0–100 floats.
+    """
+    # ── Skill score ──
+    matched = resume_canon & jd_canon
+    skill_pct = (len(matched) / len(jd_canon) * 100) if jd_canon else 0.0
 
-    # Fallback if text becomes empty after preprocessing
+    # ── Text score (rescaled) ──
+    resume_clean = preprocess_for_tfidf(resume_text)
+    jd_clean = preprocess_for_tfidf(jd_text)
+
     if not resume_clean.strip() or not jd_clean.strip():
-        text_score = 0
+        text_pct = 0.0
     else:
         try:
-            tfidf_matrix = vectorizer.fit_transform([resume_clean, jd_clean])
-            text_score = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
-        except:
-            text_score = 0
+            vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=5000)
+            tfidf = vectorizer.fit_transform([resume_clean, jd_clean])
+            raw_cosine = cosine_similarity(tfidf[0:1], tfidf[1:2])[0][0]
+            # Rescale: 0.30 raw cosine → 100%.  Clamp to [0, 100].
+            text_pct = min(raw_cosine / 0.30 * 100, 100.0)
+        except Exception:
+            text_pct = 0.0
 
-    # --- SKILL MATCH (better logic) ---
-    matched = resume_skills & jd_skills
-
-    core_matches = len([s for s in matched if s in CORE_SKILLS])
-    other_matches = len(matched) - core_matches
-
-    total_possible = len(jd_skills)
-
-    if total_possible:
-        skill_score = (core_matches * 2 + other_matches) / (total_possible * 1.5)
+    # ── Adaptive blend based on JD length ──
+    jd_word_count = len(jd_text.split())
+    if jd_word_count < 100:
+        skill_w, text_w = 0.80, 0.20     # short JD — TF-IDF unreliable
+    elif jd_word_count < 300:
+        skill_w, text_w = 0.65, 0.35
     else:
-        skill_score = 0
-    
-    skill_score = min(skill_score, 1.0)
-    # --- FINAL SCORE ---
-    if skill_score > 0.6 and text_score < 0.2:
-        text_score += 0.1  # small boost for realistic alignment
+        skill_w, text_w = 0.55, 0.45     # long JD — TF-IDF is meaningful
 
-    final_score = (0.65 * skill_score + 0.35 * text_score) * 100
+    final = skill_w * skill_pct + text_w * text_pct
+    return round(final, 1), round(skill_pct, 1), round(text_pct, 1)
 
-    return round(final_score, 1), round(skill_score * 100, 1), round(text_score * 100, 1)
 
 # ─────────────────────────────────────────────
-# 7. IMPROVEMENT SUGGESTIONS (rule-based)
+# 8. IMPROVEMENT SUGGESTIONS (rule-based)
 # ─────────────────────────────────────────────
 def generate_suggestions(
     resume_text: str,
-    missing_skills: set,
+    missing_display: list,
     match_score: float,
-) -> list[str]:
+) -> list:
     """
-    Produce actionable, prioritized suggestions based on the gap analysis.
-    Pure rule-based — no external API needed.
+    Actionable suggestions via simple string checks on raw resume text.
+    No heavy NLP — just pattern matching.
     """
-    tips: list[str] = []
-    clean = preprocess(resume_text)
+    tips = []
+    lower = resume_text.lower()
 
-    # ── Missing skills ──
-    if missing_skills:
-        top = sorted(missing_skills)[:8]
+    # Missing skills
+    if missing_display:
+        top = missing_display[:8]
         tips.append(
             "**Add missing skills:** Consider gaining experience in or "
-            f"highlighting these on your resume — {', '.join(top)}."
+            f"highlighting these — {', '.join(top)}."
         )
-    
-    if missing_skills:
-        top_missing = list(missing_skills)[:3]
-        tips.append(f"**Top gaps:** {', '.join(top_missing)}")
 
-    # ── Quantifiable achievements ──
-    has_numbers = bool(re.search(r"\d+\s*%|\$\s*\d|#?\d{2,}", clean))
-    if not has_numbers:
+    # Quantified achievements
+    if not re.search(r"\d+\s*%|\$\s*[\d,]+|\b\d{2,}\b", lower):
         tips.append(
-            "**Quantify achievements:** Use numbers and percentages. "
-            'For example, *"Reduced API latency by 35 %"* is stronger '
-            'than *"Improved API performance."*'
+            "**Quantify achievements:** Use concrete numbers. "
+            '*"Reduced latency by 35 %"* beats *"Improved performance."*'
         )
 
-    # ── Action verbs ──
-    action_verbs = {
+    # Action verbs
+    strong_verbs = {
         "led", "designed", "developed", "implemented", "architected",
         "optimized", "automated", "delivered", "managed", "launched",
         "built", "created", "spearheaded", "orchestrated", "streamlined",
     }
-    found_verbs = {v for v in action_verbs if v in clean}
-    if len(found_verbs) < 3:
+    if len({v for v in strong_verbs if v in lower}) < 3:
         tips.append(
-            "**Use stronger action verbs:** Start bullet points with words "
-            "like *Led, Designed, Architected, Optimized, Automated, Delivered*."
+            "**Use stronger action verbs:** Start bullets with words "
+            "like *Led, Architected, Optimized, Automated, Delivered*."
         )
 
-    # ── Project section ──
-    if "project" not in clean:
+    # Projects section
+    if "project" not in lower:
         tips.append(
-            "**Add a Projects section:** Showcase 2–3 relevant personal or "
-            "open-source projects that demonstrate the skills the role requires."
+            "**Add a Projects section:** 2–3 relevant projects "
+            "demonstrating the role's key skills make a strong impression."
         )
 
-    # ── Summary / objective ──
-    if "summary" not in clean and "objective" not in clean and "profile" not in clean:
+    # Professional summary
+    if not any(kw in lower for kw in ("summary", "objective", "profile", "about me")):
         tips.append(
-            "**Add a Professional Summary:** A 2–3 sentence overview at the top "
-            "helps recruiters quickly see your fit for the role."
+            "**Add a Professional Summary:** A 2–3 sentence overview "
+            "at the top helps recruiters quickly gauge fit."
         )
 
-    # ── Certifications ──
-    cert_keywords = {"certified", "certification", "certificate", "license"}
-    if not cert_keywords.intersection(clean.split()):
+    # Certifications
+    if not any(kw in lower for kw in ("certified", "certification", "certificate")):
         tips.append(
-            "**Consider certifications:** Relevant certifications (AWS, PMP, "
-            "Google Cloud, etc.) strengthen your profile for competitive roles."
+            "**Consider certifications:** AWS, GCP, PMP, or domain-specific "
+            "certs strengthen your profile for competitive roles."
         )
 
-    # ── Keyword density ──
+    # Low keyword overlap
     if match_score < 40:
         tips.append(
-            "**Mirror the job description language:** Your resume and the job "
-            "post share very few keywords.  Re-read the JD and naturally weave "
-            "its terminology into your experience bullets."
+            "**Mirror the JD language:** Your resume shares very few keywords "
+            "with the job post. Naturally weave in its terminology."
         )
 
-    # ── Length heuristic ──
-    word_count = len(clean.split())
+    # Length checks
+    word_count = len(lower.split())
     if word_count < 150:
         tips.append(
-            "**Expand your resume:** It appears quite short.  Aim for at least "
-            "one full page with detailed experience descriptions."
+            "**Expand your resume:** It appears quite short. Aim for at least "
+            "one full page with detailed experience bullets."
         )
     elif word_count > 1100:
         tips.append(
-            "**Trim for conciseness:** Your resume is very long.  For most "
-            "roles, 1–2 pages is ideal — prioritize recent and relevant experience."
+            "**Trim for conciseness:** For most roles 1–2 pages is ideal — "
+            "prioritize recent, relevant experience."
         )
 
     return tips
 
+
 # ─────────────────────────────────────────────
-# 8. STREAMLIT UI
+# 9. SKILL GROUPING FOR DISPLAY
+# ─────────────────────────────────────────────
+SKILL_CATEGORIES = {
+    "AI / ML": {
+        "ml", "dl", "nlp", "rag", "llm", "machine learning", "deep learning",
+        "natural language processing", "computer vision", "tensorflow",
+        "pytorch", "keras", "scikit-learn", "transformers", "langchain",
+        "openai", "generative ai", "bert", "gpt", "fine-tuning",
+        "huggingface", "hugging face", "classification", "regression",
+        "clustering", "feature engineering", "mlops",
+    },
+    "Data": {
+        "data science", "data analysis", "data engineering",
+        "data visualization", "statistics", "a/b testing",
+        "hypothesis testing", "time series", "pandas", "numpy", "scipy",
+        "matplotlib", "seaborn", "plotly", "tableau", "power bi", "excel",
+        "looker", "dbt", "airflow", "spark", "hadoop", "kafka", "etl",
+        "data warehouse", "snowflake", "redshift", "bigquery",
+    },
+    "Cloud / DevOps": {
+        "aws", "azure", "gcp", "google cloud", "docker", "kubernetes",
+        "k8s", "terraform", "ansible", "jenkins", "github actions",
+        "ci/cd", "cicd", "devops", "linux", "unix", "nginx", "apache",
+    },
+    "Backend / API": {
+        "api", "rest", "rest api", "grpc", "oauth", "jwt",
+        "microservices", "fastapi", "django", "flask", "spring",
+        "express", "node.js", "nodejs", "rails", "laravel", ".net", "dotnet",
+    },
+    "Frontend": {
+        "react", "angular", "vue", "svelte", "next.js", "nuxt.js",
+        "html", "css", "sass", "less", "jquery", "bootstrap", "tailwind",
+        "material ui", "figma", "sketch", "adobe xd",
+    },
+    "Databases": {
+        "sql", "nosql", "mysql", "postgresql", "postgres", "mongodb",
+        "redis", "elasticsearch", "cassandra", "dynamodb", "sqlite",
+        "oracle", "sql server", "firebase", "supabase", "neo4j", "graphql",
+    },
+    "Security": {
+        "cybersecurity", "penetration testing", "networking", "tcp/ip", "dns",
+    },
+    "Languages": {
+        "python", "java", "javascript", "typescript", "c++", "c#", "go",
+        "golang", "rust", "ruby", "php", "swift", "kotlin", "scala", "r",
+        "matlab", "perl", "bash", "shell", "powershell",
+    },
+}
+
+
+def group_skills(skills: list) -> dict:
+    """Group a list of skill display names into categories."""
+    grouped = {}
+    uncategorized = []
+    for skill in skills:
+        canon = normalize_skill(skill)
+        placed = False
+        for category, members in SKILL_CATEGORIES.items():
+            if canon in members or skill.lower() in members:
+                grouped.setdefault(category, []).append(skill)
+                placed = True
+                break
+        if not placed:
+            uncategorized.append(skill)
+    if uncategorized:
+        grouped["Other"] = uncategorized
+    return grouped
+
+
+# ─────────────────────────────────────────────
+# 10. STREAMLIT UI
 # ─────────────────────────────────────────────
 def score_color(score: float) -> str:
     if score >= 70:
-        return "#22c55e"   # green
-    elif score >= 40:
-        return "#eab308"   # yellow (IMPORTANT CHANGE)
-    else:
-        return "#ef4444"   # red
+        return "#22c55e"
+    if score >= 40:
+        return "#eab308"
+    return "#ef4444"
 
 
 def score_label(score: float) -> str:
     if score >= 75:
         return "Excellent Fit"
-    elif score >= 55:
+    if score >= 55:
         return "Good Potential"
-    elif score >= 35:
+    if score >= 35:
         return "Partial Match"
-    else:
-        return "Needs Improvement"
-
-def group_skills(skills: set):
-    groups = {
-        "Cloud": {"aws", "gcp", "azure"},
-        "DevOps": {"docker", "kubernetes", "mlops"},
-        "Backend/API": {"api", "fastapi", "rest"},
-        "AI/ML": {"classification", "deep learning", "nlp", "rag"},
-        "Security": {"cybersecurity"},
-    }
-
-    grouped = {}
-
-    for skill in skills:
-        found = False
-        for group, keywords in groups.items():
-            if skill in keywords:
-                grouped.setdefault(group, []).append(skill)
-                found = True
-                break
-        if not found:
-            grouped.setdefault("Other", []).append(skill)
-
-    return grouped
+    return "Needs Improvement"
 
 
 def main():
-    # ── Page config ──
     st.set_page_config(
         page_title="CogniCV — Smart Resume Analyzer",
         page_icon="🧠",
         layout="wide",
     )
 
-    # ── Custom CSS ──
+    # ── CSS ──
     st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap');
-
-    /* ── globals ── */
-    html, body, [class*="stApp"] {
-        font-family: 'DM Sans', sans-serif;
-    }
+    html, body, [class*="stApp"] { font-family: 'DM Sans', sans-serif; }
     .block-container { max-width: 1100px; padding-top: 2rem; }
 
-    /* ── header ── */
-    .cogni-header {
-        text-align: center;
-        padding: 2rem 0 1.2rem;
-    }
+    .cogni-header { text-align: center; padding: 2rem 0 1.2rem; }
     .cogni-header h1 {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 2.8rem;
-        font-weight: 700;
+        font-size: 2.8rem; font-weight: 700;
         background: linear-gradient(135deg, #6366f1, #06b6d4);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         margin-bottom: .25rem;
     }
-    .cogni-header p {
-        font-size: 1.05rem;
-        opacity: .65;
-        margin-top: 0;
-    }
+    .cogni-header p { font-size: 1.05rem; opacity: .65; margin-top: 0; }
 
-    /* ── score ring ── */
-    .score-card {
-        text-align: center;
-        padding: 1.5rem 0;
-    }
+    .score-card { text-align: center; padding: 1.5rem 0; }
     .score-number {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 4rem;
-        font-weight: 700;
-        line-height: 1;
+        font-size: 4rem; font-weight: 700; line-height: 1;
     }
-    .score-label {
-        font-size: 1.1rem;
-        font-weight: 500;
-        margin-top: .3rem;
+    .score-label { font-size: 1.1rem; font-weight: 500; margin-top: .3rem; }
+    .score-sub {
+        text-align: center; margin-top: 8px;
+        font-size: 0.92rem; opacity: 0.75;
     }
 
-    /* ── pills for skills ── */
     .skill-pill {
-        display: inline-block;
-        padding: 5px 14px;
-        border-radius: 999px;
-        font-size: .85rem;
-        font-weight: 500;
-        margin: 4px 4px;
+        display: inline-block; padding: 5px 14px; border-radius: 999px;
+        font-size: .85rem; font-weight: 500; margin: 4px;
     }
-    .pill-match {
-        background: rgba(34,197,94,.15);
-        color: #16a34a;
-        border: 1px solid rgba(34,197,94,.3);
-    }
-    .pill-missing {
-        background: rgba(239,68,68,.12);
-        color: #dc2626;
-        border: 1px solid rgba(239,68,68,.25);
-    }
-    .pill-resume {
-        background: rgba(99,102,241,.12);
-        color: #6366f1;
-        border: 1px solid rgba(99,102,241,.25);
-    }
+    .pill-match  { background: rgba(34,197,94,.15); color: #16a34a; border: 1px solid rgba(34,197,94,.3); }
+    .pill-missing { background: rgba(239,68,68,.12); color: #dc2626; border: 1px solid rgba(239,68,68,.25); }
+    .pill-resume  { background: rgba(99,102,241,.12); color: #6366f1; border: 1px solid rgba(99,102,241,.25); }
 
-    /* ── suggestion cards ── */
     .suggestion-box {
         background: rgba(99,102,241,.06);
         border-left: 4px solid #6366f1;
         border-radius: 0 8px 8px 0;
-        padding: 12px 18px;
-        margin-bottom: 10px;
-        font-size: .95rem;
+        padding: 12px 18px; margin-bottom: 10px; font-size: .95rem;
     }
-
-    /* ── divider ── */
     .section-title {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 1.15rem;
-        font-weight: 600;
-        margin: 1.6rem 0 .6rem;
-        padding-bottom: .4rem;
+        font-size: 1.15rem; font-weight: 600;
+        margin: 1.6rem 0 .6rem; padding-bottom: .4rem;
         border-bottom: 2px solid rgba(99,102,241,.25);
+    }
+    .category-label {
+        font-size: 0.82rem; font-weight: 600; text-transform: uppercase;
+        letter-spacing: 0.05em; opacity: 0.55; margin: 10px 0 2px 4px;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -511,199 +537,176 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # ── Input columns ──
+    # ── Inputs ──
     col_resume, col_jd = st.columns(2, gap="large")
-
     with col_resume:
         st.markdown("##### 📄 Upload Your Resume")
         uploaded_file = st.file_uploader(
-            "PDF or TXT file",
-            type=["pdf", "txt"],
-            label_visibility="collapsed",
+            "PDF or TXT", type=["pdf", "txt"], label_visibility="collapsed",
         )
-
     with col_jd:
         st.markdown("##### 💼 Paste Job Description")
         job_description = st.text_area(
-            "Paste the full job description here",
-            height=220,
-            label_visibility="collapsed",
+            "Paste here", height=220, label_visibility="collapsed",
             placeholder="Paste the full job description here …",
         )
 
-    st.markdown("")  # spacer
-
-    # ── Analyze button ──
+    st.markdown("")
     analyze = st.button("🔍  Analyze Match", use_container_width=True, type="primary")
 
     # ─────────────────────────────────────────
     # ANALYSIS PIPELINE
     # ─────────────────────────────────────────
-    if analyze:
-        # Validate inputs
-        if not uploaded_file:
-            st.warning("Please upload a resume file.")
+    if not analyze:
+        return
+
+    if not uploaded_file:
+        st.warning("Please upload a resume file.")
+        return
+    if not job_description or len(job_description.strip()) < 30:
+        st.warning("Please paste a meaningful job description (at least a few sentences).")
+        return
+
+    with st.spinner("Analyzing your resume …"):
+        # A — Extract resume text
+        if uploaded_file.name.lower().endswith(".pdf"):
+            resume_text = extract_text_from_pdf(uploaded_file)
+        else:
+            resume_text = uploaded_file.read().decode("utf-8", errors="ignore")
+
+        if len(resume_text.strip()) < 20:
+            st.error("Could not extract enough text. Try a different file or paste as TXT.")
             return
-        if not job_description or len(job_description.strip()) < 30:
-            st.warning("Please paste a meaningful job description (at least a few sentences).")
-            return
 
-        with st.spinner("Analyzing your resume …"):
+        # B — Extract raw skills from both documents
+        resume_skills_raw = extract_skills(resume_text)
+        jd_skills_raw = extract_skills(job_description)
 
-            # Step A — Extract resume text
-            if uploaded_file.name.lower().endswith(".pdf"):
-                resume_text = extract_text_from_pdf(uploaded_file)
-            else:
-                resume_text = uploaded_file.read().decode("utf-8", errors="ignore")
+        # C — Normalize for comparison (merge synonyms)
+        resume_norm = normalize_skill_set(resume_skills_raw)
+        jd_norm = normalize_skill_set(jd_skills_raw)
 
-            if len(resume_text.strip()) < 20:
-                st.error("Could not extract enough text from the resume. "
-                         "Try a different file or paste as TXT.")
-                return
+        resume_canon = set(resume_norm.keys())
+        jd_canon = set(jd_norm.keys())
 
-            # Step B — Extract skills from both documents
-            resume_skills = extract_skills(resume_text)
-            jd_skills = extract_skills(job_description)
-
-            # Step C — Filter important skills only
-            resume_skills_filtered = resume_skills
-            jd_skills_filtered = jd_skills
-
-            # Step C — Compute match score via TF-IDF + cosine similarity
-            match_score, skill_score, text_score = compute_match_score(
-                resume_text,
-                job_description,
-                resume_skills_filtered,
-                jd_skills_filtered,
-            )
-
-            # Step D — Find matched & missing skills
-            matched_skills = resume_skills_filtered & jd_skills_filtered
-            # Remove generic/non-skill words
-            GENERIC_WORDS = {
-                "communication", "teamwork", "india", "cross-functional",
-                "problem solving", "analytical thinking", "leadership", 
-            }
-
-            missing_skills = {
-                skill for skill in (jd_skills_filtered - resume_skills_filtered)
-                if skill not in GENERIC_WORDS and len(skill) > 2
-            }
-            extra_skills = resume_skills - jd_skills   # skills only in resume
-
-            # Step E — Generate suggestions
-            suggestions = generate_suggestions(resume_text, missing_skills, match_score)
-
-        # ── RESULTS ──
-        st.markdown("---")
-
-        # ── Score ──
-        color = score_color(match_score)
-        label = score_label(match_score)
-
-        if skill_score == 100 and text_score < 30:
-            color = "#f97316"
-            label = "Strong Skills, Weak Alignment"
-
-        st.markdown(
-            f'<div class="score-card">'
-            f'<div class="score-number" style="color:{color}">{match_score}%</div>'
-            f'<div class="score-label" style="color:{color}">{label}</div>'
-            f'</div>',
-            unsafe_allow_html=True,
+        # D — Compute scores
+        match_score, skill_pct, text_pct = compute_match_score(
+            resume_text, job_description, resume_canon, jd_canon,
         )
-        st.progress(min(match_score / 100, 1.0))
 
-        if match_score >= 75:
-            explanation = "Strong match"
-        elif match_score >= 55:
-            explanation = "Good match with minor gaps"
-        elif match_score >= 40:
-            explanation = "Partial match"
-        else:
-            explanation = "Needs improvement"
+        # E — Matched / missing / extra
+        matched_canon = resume_canon & jd_canon
+        missing_canon = jd_canon - resume_canon
+        extra_canon = resume_canon - jd_canon
 
-        st.markdown(f"""
-        <div style="text-align:center; margin-top:8px; font-size:0.95rem; opacity:0.75;">
-        {explanation}
-        </div>
-        """, unsafe_allow_html=True)
+        # Filter generic/soft skills from "missing" — they're noise
+        missing_canon = {
+            s for s in missing_canon
+            if s not in SOFT_GENERIC_SKILLS and len(s) > 2
+        }
 
+        # Map canonical keys back to human-readable display names
+        matched_display = sorted(jd_norm[c] for c in matched_canon)
+        missing_display = sorted(jd_norm[c] for c in missing_canon)
+        extra_display = sorted(
+            resume_norm[c] for c in extra_canon
+            if c not in SOFT_GENERIC_SKILLS
+        )
 
-        color_skill = "#22c55e" if skill_score > 70 else "#eab308"
-        color_text = "#22c55e" if text_score > 50 else "#ef4444"
-        st.markdown(f"""
-        <div style="text-align:center; margin-top:10px; font-size:0.95rem; opacity:0.85;">
-        Skill Match: <b style="color:{color_skill}">{skill_score}%</b> &nbsp;&nbsp;|&nbsp;&nbsp;
-        Text Match: <b style="color:{color_text}">{text_score}%</b>
-        </div>
-        """, unsafe_allow_html=True)
+        # F — Generate suggestions
+        suggestions = generate_suggestions(resume_text, missing_display, match_score)
 
-        # ── Matched Keywords ──
-        st.markdown('<div class="section-title">✅ Matched Keywords</div>', unsafe_allow_html=True)
-        if matched_skills:
-            pills = "".join(
-                f'<span class="skill-pill pill-match">{s}</span>'
-                for s in sorted(matched_skills)
-            )
-            st.markdown(pills, unsafe_allow_html=True)
-        else:
-            st.info("No overlapping skill keywords detected.")
+    # ─────────────────────────────────────────
+    # RESULTS
+    # ─────────────────────────────────────────
+    st.markdown("---")
 
-        # ── Missing Skills ──
-        st.markdown('<div class="section-title">❌ Missing Skills</div>', unsafe_allow_html=True)
-        if missing_skills:
-            grouped = group_skills(missing_skills)
+    # Score display
+    color = score_color(match_score)
+    label = score_label(match_score)
 
-            for group, skills in grouped.items():
-                st.markdown(f"**{group}:**")
-                pills = "".join(
-                    f'<span class="skill-pill pill-missing">{s}</span>'
-                    for s in sorted(skills)
-                )
-                st.markdown(pills, unsafe_allow_html=True)
-        else:
-            st.success("Great — your resume covers all detected JD skills!")
+    st.markdown(
+        f'<div class="score-card">'
+        f'<div class="score-number" style="color:{color}">{match_score}%</div>'
+        f'<div class="score-label" style="color:{color}">{label}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    st.progress(min(match_score / 100, 1.0))
 
-        # ── Extra Resume Skills (bonus context) ──
-        if extra_skills:
+    color_skill = "#22c55e" if skill_pct >= 60 else ("#eab308" if skill_pct >= 35 else "#ef4444")
+    color_text = "#22c55e" if text_pct >= 40 else ("#eab308" if text_pct >= 20 else "#ef4444")
+    st.markdown(
+        f'<div class="score-sub">'
+        f'Skill Overlap: <b style="color:{color_skill}">{skill_pct}%</b>'
+        f' &nbsp;·&nbsp; '
+        f'Text Similarity: <b style="color:{color_text}">{text_pct}%</b>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Matched keywords
+    st.markdown('<div class="section-title">✅ Matched Keywords</div>', unsafe_allow_html=True)
+    if matched_display:
+        pills = "".join(
+            f'<span class="skill-pill pill-match">{s}</span>' for s in matched_display
+        )
+        st.markdown(pills, unsafe_allow_html=True)
+    else:
+        st.info("No overlapping skill keywords detected.")
+
+    # Missing skills (grouped by category)
+    st.markdown('<div class="section-title">❌ Missing Skills</div>', unsafe_allow_html=True)
+    if missing_display:
+        grouped = group_skills(missing_display)
+        for category, skills in grouped.items():
             st.markdown(
-                '<div class="section-title">🔵 Skills Found in Resume (Not in JD)</div>',
+                f'<div class="category-label">{category}</div>',
                 unsafe_allow_html=True,
             )
             pills = "".join(
-                f'<span class="skill-pill pill-resume">{s}</span>'
-                for s in sorted(extra_skills)
+                f'<span class="skill-pill pill-missing">{s}</span>' for s in sorted(skills)
             )
             st.markdown(pills, unsafe_allow_html=True)
+    else:
+        st.success("Your resume covers all detected JD skills!")
 
-        # ── Improvement Suggestions ──
+    # Extra resume skills
+    if extra_display:
         st.markdown(
-            '<div class="section-title">💡 Improvement Suggestions</div>',
+            '<div class="section-title">🔵 Additional Resume Skills</div>',
             unsafe_allow_html=True,
         )
-        if suggestions:
-            for tip in suggestions:
-                st.markdown(
-                    f'<div class="suggestion-box">{tip}</div>',
-                    unsafe_allow_html=True,
-                )
-        else:
-            st.success("Your resume looks solid! Keep iterating as you grow.")
+        pills = "".join(
+            f'<span class="skill-pill pill-resume">{s}</span>' for s in extra_display
+        )
+        st.markdown(pills, unsafe_allow_html=True)
 
-        # ── Raw skill debug (collapsed) ──
-        with st.expander("🔬 Debug — Extracted Skill Details"):
-            dcol1, dcol2 = st.columns(2)
-            with dcol1:
-                st.markdown("**Resume skills**")
-                st.write(sorted(resume_skills) if resume_skills else ["(none detected)"])
-            with dcol2:
-                st.markdown("**JD skills**")
-                st.write(sorted(jd_skills) if jd_skills else ["(none detected)"])
+    # Improvement suggestions
+    st.markdown(
+        '<div class="section-title">💡 Improvement Suggestions</div>',
+        unsafe_allow_html=True,
+    )
+    if suggestions:
+        for tip in suggestions:
+            st.markdown(
+                f'<div class="suggestion-box">{tip}</div>', unsafe_allow_html=True,
+            )
+    else:
+        st.success("Your resume looks solid! Keep iterating as you grow.")
+
+    # Debug expander
+    with st.expander("🔬 Debug — All Extracted Skills"):
+        dcol1, dcol2 = st.columns(2)
+        with dcol1:
+            st.markdown("**Resume (raw → canonical)**")
+            for canon, display in sorted(resume_norm.items()):
+                st.text(f"  {display} → {canon}")
+        with dcol2:
+            st.markdown("**JD (raw → canonical)**")
+            for canon, display in sorted(jd_norm.items()):
+                st.text(f"  {display} → {canon}")
 
 
-# ─────────────────────────────────────────────
-# 9. ENTRYPOINT
-# ─────────────────────────────────────────────
 if __name__ == "__main__":
     main()
