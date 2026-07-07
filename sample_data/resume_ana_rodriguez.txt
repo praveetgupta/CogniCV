@@ -1,0 +1,44 @@
+Ana Rodriguez
+Senior Machine Learning Engineer
+ana.rodriguez@example.com | +1 (206) 555-0187 | linkedin.com/in/anarodriguez | Seattle, WA
+
+SUMMARY
+Machine learning engineer with 8+ years of experience taking models from
+notebook to production at scale. Deep expertise in PyTorch, LLM systems,
+and cloud-native ML infrastructure.
+
+EXPERIENCE
+
+Senior ML Engineer — StreamCart (e-commerce, 25M users)
+Mar 2021 – Present
+- Designed and shipped a RAG-based product QA assistant using LangChain,
+  Pinecone vector databases, and fine-tuned open-source LLMs; reduced
+  support ticket volume by 31%.
+- Built model training platform on AWS (EC2, S3) with Docker, Kubernetes,
+  and Terraform; CI/CD via GitHub Actions cut deployment time from 2 days
+  to 45 minutes.
+- Led migration of recommendation models to PyTorch; improved CTR by 12%.
+- Mentored four junior engineers; ran the team's ML design review process.
+
+ML Engineer — Finlytics
+Jun 2017 – Feb 2021
+- Developed fraud detection models (XGBoost, scikit-learn) processing
+  2M transactions/day; precision improved 22% over the legacy system.
+- Built feature pipelines with Spark and Airflow on AWS; owned SQL data
+  models in Redshift.
+- Exposed models through REST APIs (FastAPI) in a microservices stack.
+
+Software Engineer — BrightApps
+Jul 2015 – May 2017
+- Backend development in Python and PostgreSQL; introduced unit testing
+  and code review practices.
+
+EDUCATION
+M.S. in Computer Science, University of Washington, 2015
+B.S. in Applied Mathematics, UC San Diego, 2013
+
+SKILLS
+Python, SQL, PyTorch, TensorFlow, scikit-learn, XGBoost, LangChain, RAG,
+vector databases, MLflow, Spark, Airflow, AWS, Docker, Kubernetes,
+Terraform, CI/CD, GitHub Actions, FastAPI, REST APIs, microservices,
+PostgreSQL, Redshift, Git

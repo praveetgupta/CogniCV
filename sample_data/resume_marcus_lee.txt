@@ -1,0 +1,28 @@
+Marcus Lee
+Data Scientist
+marcus.lee@example.com | 415-555-0122 | San Francisco, CA
+
+PROFILE
+Data scientist with a strong statistics background, transitioning toward
+ML engineering. Comfortable across the analytics stack.
+
+EXPERIENCE
+
+Data Scientist — HealthMetrics
+Aug 2022 – Present
+- Built patient-risk classification models in Python with scikit-learn
+  and TensorFlow; AUC improved from 0.71 to 0.83.
+- Automated reporting pipelines with SQL and Airflow; dashboards in Tableau.
+- Deployed two models to production with the platform team using Docker.
+
+Data Analyst — RetailIQ
+Jan 2020 – Jul 2022
+- A/B testing and statistical analysis for pricing experiments.
+- Wrote complex SQL against BigQuery; built forecasting models (time series).
+
+EDUCATION
+B.S. in Statistics, UC Berkeley, 2019
+
+SKILLS
+Python, SQL, scikit-learn, TensorFlow, pandas, NumPy, statistics,
+A/B testing, time series, Airflow, BigQuery, Tableau, Docker, Git

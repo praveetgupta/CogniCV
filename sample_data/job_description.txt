@@ -1,0 +1,19 @@
+Senior Machine Learning Engineer — AI Platform Team
+
+We're building the ML platform that powers personalization for 40M users.
+You'll own model training infrastructure end-to-end and ship LLM-powered
+features to production.
+
+Requirements:
+- 5+ years of experience building and deploying machine learning systems
+- Expert-level Python; strong SQL
+- Production experience with PyTorch or TensorFlow
+- Hands-on experience with AWS, Docker, and CI/CD pipelines
+- Experience designing REST APIs and microservices
+- Bachelor's degree in Computer Science or a related field
+
+Nice to have:
+- Kubernetes and Terraform experience
+- LangChain, RAG pipelines, or vector databases
+- Experience with Spark or Airflow for data pipelines
+- MLOps tooling (MLflow, Kubeflow)

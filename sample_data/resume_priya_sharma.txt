@@ -1,0 +1,28 @@
+PRIYA SHARMA
+Backend Engineer
+priya.sharma@example.com | +91 98765 43210 | Bengaluru, India
+
+SUMMARY
+Backend engineer focused on distributed systems and developer tooling.
+Curious about ML but no production ML experience yet.
+
+EXPERIENCE
+
+Backend Engineer — PayFlow
+Apr 2023 – Present
+- Own payment-routing microservices in Go and Python serving 4k rps.
+- Designed REST APIs and gRPC services; PostgreSQL and Redis storage.
+- Kubernetes deployments on GCP with Terraform and CI/CD (GitLab CI).
+
+Software Engineer — CloudNine Solutions
+Jun 2021 – Mar 2023
+- Built internal tools in Python (Django) and JavaScript (React).
+- Introduced integration testing with pytest; improved code review flow.
+
+EDUCATION
+B.Tech in Computer Science, IIT Delhi, 2021
+
+SKILLS
+Python, Go, SQL, Django, REST APIs, gRPC, microservices, PostgreSQL,
+Redis, Docker, Kubernetes, Terraform, GCP, CI/CD, GitLab CI, React,
+pytest, Git, Linux
